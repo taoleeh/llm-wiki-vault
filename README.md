@@ -144,9 +144,9 @@ The agent reads the index at session start and loads individual skill files only
 
 ## Credits
 
-- **LLM Wiki pattern** — Andrej Karpathy
+- **LLM Wiki pattern** — [Andrej Karpathy](https://github.com/karpathy)
 - **Agent skill system** — Claude Code / Anthropic skill ecosystem
-- **notebooklm-py** — Teng Ling (optional complement for bulk document offloading)
+- **[notebooklm-py](https://github.com/teng-lin/notebooklm-py)** — [Teng Ling](https://github.com/teng-lin)
 
 ---
 
