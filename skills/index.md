@@ -1,7 +1,7 @@
 # Skills Index
 
 Load this file on session start. Do NOT load individual skill files until their trigger occurs.
-When a trigger matches, read `skills/skills/<name>/SKILL.md` and follow its instructions.
+When a trigger matches, read the corresponding skill file and follow its instructions.
 
 ---
 
@@ -13,11 +13,3 @@ When a trigger matches, read `skills/skills/<name>/SKILL.md` and follow its inst
 | research | skills/research.md | User asks a question requiring wiki lookup or topic exploration |
 | lint | skills/lint.md | User says /lint or asks to health-check the wiki |
 | wrap-up | skills/wrap-up.md | User says /wrap-up or the session is ending |
-
----
-
-## Agent Skills
-
-| Skill | File | Load when... |
-|-------|------|--------------|
-| skill-name | skills/skills/skill-name/SKILL.md | Load when... |

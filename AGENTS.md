@@ -3,23 +3,18 @@
 ## How this vault works
 This is an LLM-maintained wiki. You write and maintain all files in wiki/.
 Raw sources go in raw/ (never modify them). You own everything in wiki/.
-Skills live in skills/skills/ — most are loaded on demand, not at session start.
+Skills live in skills/ — they are loaded on demand when their trigger occurs.
 
 ---
 
 ## On session start
 
-1. Load these skill files unconditionally:
-   - skills/skills/caveman/SKILL.md
-   - skills/skills/verification-before-completion/SKILL.md
-   - skills/skills/using-superpowers/SKILL.md
+1. Read skills/index.md to know what skills are available and their triggers.
+   Do not load any skill files until their trigger occurs.
 
-2. Read skills/index.md to know what other skills are available and their triggers.
-   Do not load any other skill files until their trigger occurs.
+2. Read wiki/index.md to orient yourself in the knowledge base (if it exists).
 
-3. Read wiki/index.md to orient yourself in the knowledge base (if it exists).
-
-4. Read the last 3 entries of wiki/log.md for recent context (if it exists).
+3. Read the last 3 entries of wiki/log.md for recent context (if it exists).
 
 ---
 
@@ -34,8 +29,6 @@ vault/
     research.md
     lint.md
     wrap-up.md
-    skills/<skill-name>/        ← all other skills live in subfolders
-      SKILL.md
   wiki/
     index.md             ← master catalog of all wiki pages, always update after changes
     log.md               ← append-only session log, never overwrite

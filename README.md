@@ -28,11 +28,10 @@ vault/
     ├── ingest.md              ← process a new source into the wiki
     ├── research.md            ← query the wiki and file valuable answers back
     ├── lint.md                ← health-check the wiki for gaps and contradictions
-    ├── wrap-up.md             ← extract session learnings and persist them
-    └── skills/                ← add your own skill library
+    └── wrap-up.md             ← extract session learnings and persist them
 ```
 
-The `skills/skills` folder is designed to be extended with your own skill library. The four wiki operation skills (`ingest`, `research`, `lint`, `wrap-up`) are the only ones included — everything else is up to you.
+The four wiki operation skills (`ingest`, `research`, `lint`, `wrap-up`) are the only skills included.
 
 ---
 
@@ -62,21 +61,13 @@ git clone https://github.com/taoleeh/llm-wiki-vault ~/vault
 cd ~/vault
 ```
 
-**2. Add your existing skills** (optional)
-
-If you have an existing skill library, copy your skill subfolders into `skills/skills/` and add their entries to `skills/index.md`. The index format is:
-
-```markdown
-| skill-name | skills/skills/skill-name/SKILL.md | Load when... |
-```
-
-**3. Launch your agent**
+**2. Launch your agent**
 
 ```bash
 opencode   # or: claude, codex, etc.
 ```
 
-**4. Send this exact message to start your first session:**
+**3. Send this exact message to start your first session:**
 
 > "Read raw/llmwiki.md in full. This describes the wiki pattern we are using.
 > Then initialize the wiki structure by creating wiki/index.md and wiki/log.md,
@@ -91,7 +82,6 @@ This single message does three things: gives the agent the pattern, scaffolds th
 ```
 Start session
   → agent reads AGENTS.md
-  → agent loads 3 always-on skills
   → agent reads skills/index.md
   → agent reads wiki/index.md
   → agent reads last 3 log entries
@@ -119,26 +109,6 @@ This vault is agent-agnostic. It works with any LLM agent that reads a config fi
 | Gemini CLI | GEMINI.md (rename AGENTS.md) |
 
 The skill system uses plain markdown files with a YAML frontmatter header. No vendor lock-in.
-
----
-
-## Extending with skills
-
-The `skills/index.md` manifest is how the agent discovers capabilities on demand. To add a skill:
-
-1. Create `skills/skills/your-skill-name/SKILL.md` with a YAML frontmatter header:
-   ```yaml
-   ---
-   name: your-skill-name
-   description: What this skill does and when to use it
-   ---
-   ```
-2. Add a row to `skills/index.md`:
-   ```markdown
-   | your-skill-name | skills/skills/your-skill-name/SKILL.md | Load when... |
-   ```
-
-The agent reads the index at session start and loads individual skill files only when their trigger condition is met. Skills that are large or detailed cost nothing until they're actually needed.
 
 ---
 
