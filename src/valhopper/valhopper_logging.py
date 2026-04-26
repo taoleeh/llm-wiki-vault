@@ -66,7 +66,7 @@ def write_transaction_log(results):
 
         lines.append(f"Transaction #{i}")
         lines.append(f"  Subnet:    {pos.netuid}")
-        lines.append(f"  Amount:    {pos.stake.tao:.4f} {pos.token_symbol}")
+    lines.append(f" Amount: {pos.stake_tao:.4f} {pos.token_symbol}")
         lines.append(f"  From:      {pos.hotkey}")
         lines.append(f"  To:        {pos.best_validator_hotkey}")
         lines.append(f"  Status:    {status_str}")

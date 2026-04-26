@@ -6,9 +6,9 @@ moving stakes to the most profitable validators.
 """
 
 import os
-import time
+import json as json_lib
 import logging
-import enum
+
 os.environ['BT_NO_PARSE_CLI_ARGS'] = '1'
 
 import click
@@ -16,518 +16,26 @@ from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
-from typing import Optional
 
-import bittensor
-from bittensor import Balance
+from .models import (
+    StakePosition,
+    ReturnResult,
+    fmt_ret,
+    get_token_symbol,
+    color_trust,
+    color_age,
+)
+from .client import BittensorClient
 from .valhopper_transactions import load_wallet, execute_stake_move, format_transaction_results
 from .valhopper_logging import write_transaction_log
 
-# Configure structured logging
 logging.basicConfig(
     level=logging.WARNING,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
 )
 logger = logging.getLogger('valhopper')
 
-
-# --- Error types ---
-class ReturnError(enum.Enum):
-    """Reasons return computation returns 0."""
-    NO_ERROR = "no_error"
-    VALIDATOR_NOT_IN_METAGRAPH = "validator_not_in_metagraph"
-    NO_STAKE = "no_stake"
-    NO_EMISSION = "no_emission"
-    NETWORK_ERROR = "network_error"
-
-
-class ReturnResult:
-    """Result of return computation with status."""
-    def __init__(self, value: float, error: ReturnError, message: str = ""):
-        self.value = value
-        self.error = error
-        self.message = message
-
-    @property
-    def is_error(self) -> bool:
-        return self.error != ReturnError.NO_ERROR
-
 console = Console()
-
-
-# ---------------------------------------------------------------------------
-# Risk level filter thresholds
-# ---------------------------------------------------------------------------
-
-RISK_LEVELS = {
-    'conservative': {
-        'min_trust': 0.95,
-        'min_age_days': 90,
-        'min_validator_permits': 1,
-        'min_nominators': 100,
-        'fallback_min_trust': 0.80,
-        'fallback_min_age_days': 30,
-    },
-    'moderate': {
-        'min_trust': 0.80,
-        'min_age_days': 30,
-        'min_validator_permits': 1,  # OR min_nominators
-        'min_nominators': 10,
-        'fallback_min_trust': 0.50,
-        'fallback_min_age_days': 7,
-    },
-    'aggressive': {
-        'min_trust': 0.50,
-        'min_age_days': 7,
-        'min_validator_permits': 0,
-        'min_nominators': 0,
-        'fallback_min_trust': 0.0,
-        'fallback_min_age_days': 0,
-    },
-}
-
-SECONDS_PER_BLOCK = 12
-BLOCKS_PER_DAY = 86400 // SECONDS_PER_BLOCK  # 7200
-
-
-def get_token_symbol(netuid: int) -> str:
-    """Get the token symbol for a subnet."""
-    symbols = {0: "τ", 1: "α", 2: "β", 3: "γ", 4: "δ", 5: "ε"}
-    return symbols.get(netuid, f"S{netuid}")
-
-
-def fmt_ret(val: float) -> str:
-    """Format a return_per_1000 value for display."""
-    if val == 0:
-        return "[dim]0[/dim]"
-    if val < 0.01:
-        return f"{val:.6f}"
-    if val < 1:
-        return f"{val:.4f}"
-    if val < 100:
-        return f"{val:.2f}"
-    return f"{val:.1f}"
-
-
-# ---------------------------------------------------------------------------
-# StakePosition
-# ---------------------------------------------------------------------------
-
-class StakePosition:
-    """Represents a stake position with return-per-1000 calculations."""
-
-    def __init__(self, hotkey: str, netuid: int, stake: Balance,
-                 current_validator_return: float = 0.0,
-                 best_validator_return: float = 0.0,
-                 best_validator_hotkey: str = "",
-                 best_validator_trust: float = 0.0,
-                 best_validator_age_days: float = 0.0,
-                 best_validator_nominators: int = 0,
-                 best_validator_permits: int = 0,
-                 best_validator_take: float = 0.0,
-                 current_validator_trust: float = 0.0):
-        self.hotkey = hotkey
-        self.netuid = netuid
-        self.stake = stake
-        self.current_validator_return = current_validator_return
-        self.best_validator_return = best_validator_return
-        self.best_validator_hotkey = best_validator_hotkey
-        self.best_validator_trust = best_validator_trust
-        self.best_validator_age_days = best_validator_age_days
-        self.best_validator_nominators = best_validator_nominators
-        self.best_validator_permits = best_validator_permits
-        self.best_validator_take = best_validator_take
-        self.current_validator_trust = current_validator_trust
-
-    @property
-    def token_symbol(self) -> str:
-        return get_token_symbol(self.netuid)
-
-    @property
-    def current_return_per_1000(self) -> float:
-        """Current validator: alpha earned per 1000 alpha staked per day."""
-        return self.current_validator_return
-
-    @property
-    def best_return_per_1000(self) -> float:
-        """Best validator: alpha earned per 1000 alpha staked per day."""
-        return self.best_validator_return
-
-    @property
-    def return_delta(self) -> float:
-        """Improvement in return_per_1000 if moved to best validator."""
-        return self.best_validator_return - self.current_validator_return
-
-    @property
-    def current_daily_earn(self) -> float:
-        """Daily alpha earned with current validator (post-take)."""
-        return (self.stake.tao / 1000) * self.current_validator_return
-
-    @property
-    def new_daily_earn(self) -> float:
-        """Daily alpha earned if moved to best validator (post-take)."""
-        return (self.stake.tao / 1000) * self.best_validator_return
-
-    @property
-    def potential_additional_daily(self) -> float:
-        """Additional daily alpha earned if moved to best validator."""
-        return self.new_daily_earn - self.current_daily_earn
-
-
-# ---------------------------------------------------------------------------
-# Helper: colour-code risk signals for Rich tables
-# ---------------------------------------------------------------------------
-
-def _color_trust(trust: float) -> str:
-    s = f"{trust:.4f}"
-    if trust >= 0.95:
-        return f"[green]{s}[/green]"
-    if trust >= 0.80:
-        return f"[yellow]{s}[/yellow]"
-    if trust > 0:
-        return f"[red]{s}[/red]"
-    return "-"
-
-
-def _color_age(age_days: float) -> str:
-    if age_days <= 0:
-        return "-"
-    s = f"{age_days:.0f}d"
-    if age_days >= 90:
-        return f"[green]{s}[/green]"
-    if age_days >= 30:
-        return f"[yellow]{s}[/yellow]"
-    return f"[red]{s}[/red]"
-
-
-# ---------------------------------------------------------------------------
-# BittensorClient
-# ---------------------------------------------------------------------------
-
-class BittensorClient:
-    """Client for interacting with the Bittensor blockchain."""
-
-    def __init__(self, network: str = "finney"):
-        self.network = network
-        self.subtensor = bittensor.Subtensor(network=network)
-        self._delegates_cache = None  # (data, timestamp)
-        self._metagraph_cache = {}    # netuid -> (data, timestamp)
-        self._current_block = None
-        self._tempo_cache = {}        # netuid -> (tempo, timestamp)
-        self.CACHE_TTL = 300  # 5 minutes
-
-    def _cache_is_valid(self, cached):
-        """Check if cache entry is still valid."""
-        if cached is None:
-            return False
-        data, timestamp = cached
-        return time.time() - timestamp < self.CACHE_TTL
-
-    def refresh_caches(self):
-        """Force refresh all caches before live execution."""
-        self._delegates_cache = None
-        self._metagraph_cache = {}
-        self._current_block = None
-        self._tempo_cache = {}
-
-    # -- caching data fetchers -----------------------------------------------
-
-    def get_delegates(self) -> list:
-        if not self._cache_is_valid(self._delegates_cache):
-            self._delegates_cache = (self.subtensor.get_delegates(), time.time())
-        return self._delegates_cache[0]
-
-    def _get_take(self, hotkey: str) -> float:
-        """Get delegate take for a hotkey."""
-        for d in self.get_delegates():
-            if d.hotkey_ss58 == hotkey:
-                return d.take
-        return 0.18  # default take
-
-    def _get_subnet_tempo(self, netuid: int) -> int:
-        """Get tempo for a subnet, with caching."""
-        if netuid not in self._tempo_cache or not self._cache_is_valid(self._tempo_cache[netuid]):
-            hp = self.subtensor.get_subnet_hyperparameters(netuid)
-            self._tempo_cache[netuid] = (hp.tempo, time.time())
-        return self._tempo_cache[netuid][0]
-
-    def get_metagraph(self, netuid: int):
-        """Get and cache metagraph for a subnet."""
-        if netuid not in self._metagraph_cache or not self._cache_is_valid(self._metagraph_cache[netuid]):
-            self._metagraph_cache[netuid] = (self.subtensor.metagraph(netuid), time.time())
-            time.sleep(0.1)  # Rate limit RPC calls
-        return self._metagraph_cache[netuid][0]
-
-    def get_current_block(self) -> int:
-        if self._current_block is None or time.time() - self._current_block[1] > 60:
-            self._current_block = (self.subtensor.get_current_block(), time.time())
-        return self._current_block[0]
-
-    # -- identity -----------------------------------------------------------
-
-    def get_validator_identity(self, hotkey: str) -> str:
-        try:
-            identity = self.subtensor.get_identity(hotkey_ss58=hotkey)
-            if identity and identity.name:
-                return f"{identity.name.strip()} ({hotkey[:8]}...)"
-        except Exception:
-            pass
-        return f"{hotkey[:16]}..."
-
-    # -- risk info ----------------------------------------------------------
-
-    def _get_validator_risk_info(self, hotkey: str, netuid: int) -> dict:
-        """Get risk signals for a validator from metagraph + delegates."""
-        info = {
-            'trust': 0.0,
-            'age_days': 0.0,
-            'validator_permits': 0,
-            'nominators': 0,
-            'take': 0.0,
-            'in_metagraph': False,
-        }
-
-        # From metagraph: trust, age
-        try:
-            meta = self.get_metagraph(netuid)
-            cur_block = self.get_current_block()
-            uid = None
-            for i, hk in enumerate(meta.hotkeys):
-                if hk == hotkey:
-                    uid = i
-                    break
-            if uid is not None:
-                info['in_metagraph'] = True
-            if uid is not None and uid < len(meta.Tv):
-                info['trust'] = float(meta.Tv[uid])
-                reg_block = (
-                    meta.block_at_registration[uid]
-                    if uid < len(meta.block_at_registration) else 0
-                )
-                if reg_block > 0:
-                    info['age_days'] = (cur_block - reg_block) * SECONDS_PER_BLOCK / 86400
-        except Exception:
-            pass
-
-        # From delegates: permits, nominators, take
-        for d in self.get_delegates():
-            if d.hotkey_ss58 == hotkey:
-                info['validator_permits'] = len(d.validator_permits)
-                info['nominators'] = len(d.nominators)
-                info['take'] = d.take
-                break
-
-        return info
-
-    def _apply_risk_filters(self, delegates: list, netuid: int,
-                            risk_level: str = 'moderate') -> list:
-        """Filter delegates by risk level thresholds.
-
-        Returns list of (delegate, risk_info) tuples that pass the filters.
-        Uses primary thresholds first, falls back to relaxed if none pass.
-        """
-        config = RISK_LEVELS.get(risk_level, RISK_LEVELS['moderate'])
-
-        candidates = []
-        for d in delegates:
-            risk = self._get_validator_risk_info(d.hotkey_ss58, netuid)
-            # Skip deregistered validators (not in metagraph)
-            if not risk['in_metagraph']:
-                continue
-            candidates.append((d, risk))
-
-        # --- primary filter ---
-        primary = []
-        for d, risk in candidates:
-            if risk['trust'] < config['min_trust']:
-                continue
-            if risk['age_days'] < config['min_age_days']:
-                continue
-            # moderate: permits OR nominators
-            if risk_level == 'moderate':
-                if risk['validator_permits'] < 1 and risk['nominators'] < config['min_nominators']:
-                    continue
-            else:
-                if risk['validator_permits'] < config['min_validator_permits']:
-                    continue
-                if risk['nominators'] < config['min_nominators']:
-                    continue
-            primary.append((d, risk))
-
-        if primary:
-            return primary
-
-        # --- fallback filter ---
-        console.print(
-            f"[dim]  Subnet {netuid}: No validators pass {risk_level} "
-            f"primary filters, using fallback thresholds[/dim]"
-        )
-        fallback = []
-        for d, risk in candidates:
-            if risk['trust'] < config['fallback_min_trust']:
-                continue
-            if risk['age_days'] < config['fallback_min_age_days']:
-                continue
-            fallback.append((d, risk))
-        return fallback
-
-    # -- per-subnet return computation -----------------------------------------
-    def _compute_return_per_1k(self, hotkey: str, netuid: int) -> float:
-        """Compute per-subnet return per 1000 staked per day."""
-        result = self._compute_return_per_1k_with_status(hotkey, netuid)
-        logger.debug(f"Return {result.value:.6f} for {hotkey[:12]} on subnet {netuid}: {result.error.value}")
-        return result.value
-
-    def _compute_return_per_1k_with_status(self, hotkey: str, netuid: int) -> ReturnResult:
-        """Compute per-subnet return per 1000 staked per day with status info."""
-        try:
-            meta = self.get_metagraph(netuid)
-            uid = None
-            for i, hk in enumerate(meta.hotkeys):
-                if hk == hotkey:
-                    uid = i
-                    break
-            if uid is None:
-                return ReturnResult(0.0, ReturnError.VALIDATOR_NOT_IN_METAGRAPH, "Validator not in metagraph")
-
-            take = self._get_take(hotkey)
-            tempo = self._get_subnet_tempo(netuid)
-            if tempo <= 0:
-                logger.warning(f"Invalid tempo {tempo} for subnet {netuid}")
-                tempo = 360  # Default tempo fallback
-            tempos_per_day = BLOCKS_PER_DAY / tempo
-            stake = float(meta.S[uid])
-            if stake <= 0:
-                return ReturnResult(0.0, ReturnError.NO_STAKE, "Validator has no stake")
-
-            if netuid == 0:
-                # Root subnet: use tao_dividends_per_hotkey
-                tao_div = meta.tao_dividends_per_hotkey[uid]
-                if isinstance(tao_div, tuple):
-                    tao_div = tao_div[1]
-                tao_div = float(tao_div)
-                if tao_div <= 0:
-                    # Fallback to emission-based for roots without direct tao_div
-                    emission = float(meta.emission[uid])
-                    if emission <= 0:
-                        return ReturnResult(0.0, ReturnError.NO_EMISSION, "No root emission")
-                    daily_tao = emission * tempos_per_day * (1 - take)
-                    return ReturnResult(daily_tao / stake * 1000, ReturnError.NO_ERROR, "")
-                daily_tao = tao_div * tempos_per_day * (1 - take)
-                return ReturnResult(daily_tao / stake * 1000, ReturnError.NO_ERROR, "")
-            else:
-                # Alpha subnets: use alpha_dividends + tao_dividends/price
-                alpha_div = meta.alpha_dividends_per_hotkey[uid]
-                tao_div = meta.tao_dividends_per_hotkey[uid]
-                if isinstance(alpha_div, tuple):
-                    alpha_div = alpha_div[1]
-                if isinstance(tao_div, tuple):
-                    tao_div = tao_div[1]
-                alpha_div = float(alpha_div)
-                tao_div = float(tao_div)
-
-                # Combine alpha and tao (converted to alpha)
-                price = meta.pool.moving_price
-                total_alpha = alpha_div
-                if price > 0:
-                    total_alpha += tao_div / price
-
-                if total_alpha <= 0:
-                    return ReturnResult(0.0, ReturnError.NO_EMISSION, "No alpha subnet emission")
-
-                # Nominator gets (1 - take) share
-                daily_alpha = total_alpha * tempos_per_day * (1 - take)
-                return ReturnResult(daily_alpha / stake * 1000, ReturnError.NO_ERROR, "")
-        except Exception as e:
-            logger.warning(f"Network error for {hotkey[:12]}... on subnet {netuid}: {e}")
-            return ReturnResult(0.0, ReturnError.NETWORK_ERROR, str(e))
-
-    # -- best validator -----------------------------------------------------
-    def get_best_validator_for_subnet(self, netuid: int,
-                                     risk_level: str = 'moderate') -> Optional[dict]:
-        """Find the best validator for a subnet, filtered by risk level.
-
-        Computes per-subnet return from metagraph emission data instead
-        of the broken aggregate return_per_1000 from get_delegates().
-        """
-        delegates = self.get_delegates()
-        subnet_delegates = [
-            d for d in delegates
-            if netuid in d.registrations
-        ]
-        if not subnet_delegates:
-            return None
-
-        filtered = self._apply_risk_filters(subnet_delegates, netuid, risk_level)
-        if not filtered:
-            return None
-
-        # Compute per-subnet return and sort
-        scored = []
-        for d, risk in filtered:
-            ret = self._compute_return_per_1k(d.hotkey_ss58, netuid)
-            if ret > 0:
-                scored.append((d, risk, ret))
-
-        if not scored:
-            return None
-
-        scored.sort(key=lambda x: x[2], reverse=True)
-        best, risk, ret = scored[0]
-        return {
-            'hotkey': best.hotkey_ss58,
-            'return_per_1000': ret,
-            'take': best.take,
-            'trust': risk['trust'],
-            'age_days': risk['age_days'],
-            'nominators': risk['nominators'],
-            'validator_permits': risk['validator_permits'],
-        }
-
-    # -- validator return ---------------------------------------------------
-    def get_validator_return(self, hotkey: str, netuid: int) -> float:
-        """Compute per-subnet return_per_1000 from metagraph emission data.
-
-        Does NOT use get_delegates().return_per_1000 which is a broken
-        aggregate across all subnets in mixed alpha/tao units.
-        """
-        return self._compute_return_per_1k(hotkey, netuid)
-
-    # -- stakes -------------------------------------------------------------
-
-    def get_stakes(self, coldkey_ss58: str,
-                   risk_level: str = 'moderate') -> list[StakePosition]:
-        """Get all stake positions for a coldkey, filtered by risk level."""
-        try:
-            stake_infos = self.subtensor.get_stake_info_for_coldkey(coldkey_ss58)
-        except Exception as e:
-            console.print(f"[red]Error fetching stakes: {e}[/red]")
-            return []
-
-        positions = []
-        for si in stake_infos:
-            if si.stake.tao > 0:
-                current_return = self.get_validator_return(si.hotkey_ss58, si.netuid)
-                best_validator = self.get_best_validator_for_subnet(si.netuid, risk_level)
-
-                current_risk = self._get_validator_risk_info(si.hotkey_ss58, si.netuid)
-                position = StakePosition(
-                    hotkey=si.hotkey_ss58,
-                    netuid=si.netuid,
-                    stake=si.stake,
-                    current_validator_return=current_return,
-                    best_validator_return=best_validator['return_per_1000'] if best_validator else 0,
-                    best_validator_hotkey=best_validator['hotkey'] if best_validator else "",
-                    best_validator_trust=best_validator.get('trust', 0.0) if best_validator else 0.0,
-                    best_validator_age_days=best_validator.get('age_days', 0.0) if best_validator else 0.0,
-                    best_validator_nominators=best_validator.get('nominators', 0) if best_validator else 0,
-                    best_validator_permits=best_validator.get('validator_permits', 0) if best_validator else 0,
-                    best_validator_take=best_validator.get('take', 0.0) if best_validator else 0.0,
-                    current_validator_trust=current_risk['trust'],
-                )
-                positions.append(position)
-
-        return positions
 
 
 # ---------------------------------------------------------------------------
@@ -594,7 +102,7 @@ def list_stakes(ctx):
     table.add_column("Best\nTrust", justify="right")
     table.add_column("Val Age", justify="right")
 
-    for p in sorted(positions, key=lambda x: x.stake.tao, reverse=True):
+    for p in sorted(positions, key=lambda x: x.stake_tao, reverse=True):
         best_validator = (client.get_validator_identity(p.best_validator_hotkey)
                           if p.best_validator_hotkey else "-")
 
@@ -612,14 +120,14 @@ def list_stakes(ctx):
 
         table.add_row(
             str(p.netuid),
-            f"{p.stake.tao:.4f} {p.token_symbol}",
+            f"{p.stake_tao:.4f} {p.token_symbol}",
             fmt_ret(p.current_daily_earn),
             best_daily_str,
             delta_str,
             f"[dim]{best_validator}[/dim]" if best_validator != "-" else "-",
-            _color_trust(p.current_validator_trust),
-            _color_trust(p.best_validator_trust),
-            _color_age(p.best_validator_age_days),
+            color_trust(p.current_validator_trust),
+            color_trust(p.best_validator_trust),
+            color_age(p.best_validator_age_days),
         )
 
     console.print(table)
@@ -687,7 +195,7 @@ def optimize(ctx, dry_run, risk_level, max_stake_per_move):
     if max_stake_per_move is not None:
         movable_positions = [
             p for p in movable_positions
-            if p.stake.tao <= max_stake_per_move
+            if p.stake_tao <= max_stake_per_move
         ]
         if not movable_positions:
             console.print(f"[yellow]No positions under {max_stake_per_move} TAO stake[/yellow]")
@@ -711,7 +219,7 @@ def optimize(ctx, dry_run, risk_level, max_stake_per_move):
     total_daily_gain = 0
 
     for p in movable_positions:
-        total_stake_to_move += p.stake.tao
+        total_stake_to_move += p.stake_tao
         total_daily_gain += p.potential_additional_daily
 
         from_val = client.get_validator_identity(p.hotkey)
@@ -725,15 +233,15 @@ def optimize(ctx, dry_run, risk_level, max_stake_per_move):
 
         table.add_row(
             str(p.netuid),
-            f"{p.stake.tao:.4f} {p.token_symbol}",
+            f"{p.stake_tao:.4f} {p.token_symbol}",
             f"[red]{from_val}[/red]",
             f"[green]{to_val}[/green]",
             fmt_ret(p.current_daily_earn),
             f"[yellow]{fmt_ret(p.new_daily_earn)}[/yellow]",
             delta_str,
-            _color_trust(p.current_validator_trust),
-            _color_trust(p.best_validator_trust),
-            _color_age(p.best_validator_age_days),
+            color_trust(p.current_validator_trust),
+            color_trust(p.best_validator_trust),
+            color_age(p.best_validator_age_days),
             str(p.best_validator_nominators),
             f"{p.best_validator_take*100:.2f}%",
         )
@@ -899,8 +407,8 @@ def top_validators(ctx, netuid, risk_level):
                 str(i),
                 f"{d.hotkey_ss58[:20]}...",
                 fmt_ret(ret),
-                _color_trust(risk['trust']),
-                _color_age(risk['age_days']),
+        color_trust(risk['trust']),
+        color_age(risk['age_days']),
                 str(risk['nominators']),
                 f"{d.take*100:.2f}%",
             )

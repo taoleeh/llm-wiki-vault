@@ -171,7 +171,7 @@ def format_transaction_results(results, console):
         table.add_row(
             str(i),
             str(pos.netuid),
-            f"{pos.stake.tao:.4f} {pos.token_symbol}",
+            f"{pos.stake_tao:.4f} {pos.token_symbol}",
             from_addr,
             to_addr,
             status,
