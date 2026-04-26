@@ -1,0 +1,15 @@
+LICENSE
+README.md
+pyproject.toml
+src/valhopper/__init__.py
+src/valhopper/valhopper_cli.py
+src/valhopper/valhopper_transactions.py
+src/valhopper.egg-info/PKG-INFO
+src/valhopper.egg-info/SOURCES.txt
+src/valhopper.egg-info/dependency_links.txt
+src/valhopper.egg-info/entry_points.txt
+src/valhopper.egg-info/requires.txt
+src/valhopper.egg-info/top_level.txt
+tests/test_cache.py
+tests/test_optimize.py
+tests/test_return_result.py

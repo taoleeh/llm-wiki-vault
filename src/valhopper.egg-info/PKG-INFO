@@ -1,3 +1,36 @@
+Metadata-Version: 2.4
+Name: valhopper
+Version: 0.1.0
+Summary: Bittensor Alpha Token Stake Optimizer - Move stakes to the most profitable validators
+Author: ValHopper Team
+License: MIT
+Project-URL: Homepage, https://github.com/taoleeh/valhopper
+Project-URL: Documentation, https://github.com/taoleeh/valhopper#readme
+Project-URL: Repository, https://github.com/taoleeh/valhopper
+Project-URL: Issues, https://github.com/taoleeh/valhopper/issues
+Keywords: bittensor,staking,validator,defi,blockchain
+Classifier: Development Status :: 4 - Beta
+Classifier: Intended Audience :: Developers
+Classifier: Intended Audience :: Financial and Insurance Industry
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: bittensor>=10.0.0
+Requires-Dist: click>=8.0.0
+Requires-Dist: rich>=13.0.0
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0.0; extra == "dev"
+Requires-Dist: pytest-asyncio>=0.21.0; extra == "dev"
+Requires-Dist: black>=23.0.0; extra == "dev"
+Requires-Dist: ruff>=0.1.0; extra == "dev"
+Requires-Dist: mypy>=1.0.0; extra == "dev"
+Dynamic: license-file
+
 # ValHopper
 
 **Bittensor Alpha Token Stake Optimizer**

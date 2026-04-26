@@ -12,7 +12,7 @@ src_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src')
 if os.path.exists(src_path):
     sys.path.insert(0, src_path)
 
-from valhopper_cli import cli
+from valhopper.valhopper_cli import cli
 
 if __name__ == '__main__':
     cli()

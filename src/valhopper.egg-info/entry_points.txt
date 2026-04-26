@@ -1,0 +1,3 @@
+[console_scripts]
+valhopper = valhopper.valhopper_cli:cli
+vh = valhopper.valhopper_cli:cli

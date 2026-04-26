@@ -39,14 +39,14 @@ dev = [
 ]
 
 [project.scripts]
-valhopper = "valhopper_cli:cli"
-vh = "valhopper_cli:cli"
+valhopper = "valhopper.valhopper_cli:cli"
+vh = "valhopper.valhopper_cli:cli"
 
 [project.urls]
-Homepage = "https://github.com/wiggly/valhopper"
-Documentation = "https://github.com/wiggly/valhopper#readme"
-Repository = "https://github.com/wiggly/valhopper"
-Issues = "https://github.com/wiggly/valhopper/issues"
+Homepage = "https://github.com/taoleeh/valhopper"
+Documentation = "https://github.com/taoleeh/valhopper#readme"
+Repository = "https://github.com/taoleeh/valhopper"
+Issues = "https://github.com/taoleeh/valhopper/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
