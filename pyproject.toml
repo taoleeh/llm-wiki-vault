@@ -27,6 +27,7 @@ dependencies = [
     "bittensor>=10.0.0",
     "click>=8.0.0",
     "rich>=13.0.0",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
