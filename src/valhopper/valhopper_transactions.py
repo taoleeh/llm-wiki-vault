@@ -1,8 +1,13 @@
 """Transaction execution for ValHopper."""
 
 import os
+import time
+
 import click
 import bittensor
+
+MAX_RETRIES = 3
+RETRY_DELAYS = [2, 5, 10]
 
 
 def load_wallet(wallet_name, wallet_hotkey, wallet_path):
@@ -76,72 +81,84 @@ def load_wallet(wallet_name, wallet_hotkey, wallet_path):
     return wallet
 
 
-def execute_stake_move(subtensor, wallet, position):
-    """Execute a single stake move transaction.
+def execute_stake_move(subtensor, wallet, position, max_retries: int = MAX_RETRIES):
+    """Execute a single stake move transaction with retry logic.
 
     Args:
         subtensor: Bittensor subtensor instance
         wallet: Wallet instance
         position: StakePosition to move
+        max_retries: Maximum number of retry attempts for transient errors
 
     Returns:
         (success: bool, message: str, details: dict) tuple
-        details contains fees and stake changes if successful.
     """
-    try:
-        response = subtensor.move_stake(
-            wallet=wallet,
-            origin_netuid=position.netuid,
-            origin_hotkey_ss58=position.hotkey,
-            destination_netuid=position.netuid,
-            destination_hotkey_ss58=position.best_validator_hotkey,
-            move_all_stake=True,
-            wait_for_inclusion=True,
-            wait_for_finalization=True,
-        )
+    last_exception = None
+    for attempt in range(max_retries + 1):
+        try:
+            response = subtensor.move_stake(
+                wallet=wallet,
+                origin_netuid=position.netuid,
+                origin_hotkey_ss58=position.hotkey,
+                destination_netuid=position.netuid,
+                destination_hotkey_ss58=position.best_validator_hotkey,
+                move_all_stake=True,
+                wait_for_inclusion=True,
+                wait_for_finalization=True,
+            )
 
-        # ExtrinsicResponse attributes: .success, .message, .error, .data
-        if response.success:
-            details = {}
+            if response.success:
+                details = {}
+                if hasattr(response, 'transaction_tao_fee') and response.transaction_tao_fee:
+                    details['tao_fee'] = response.transaction_tao_fee
+                if hasattr(response, 'transaction_alpha_fee') and response.transaction_alpha_fee:
+                    details['alpha_fee'] = response.transaction_alpha_fee
+                if hasattr(response, 'data') and response.data:
+                    details.update(response.data)
+                parts = []
+                if hasattr(response, 'extrinsic_receipt') and response.extrinsic_receipt:
+                    receipt = response.extrinsic_receipt
+                    if hasattr(receipt, 'block_hash'):
+                        parts.append(f"block: {str(receipt.block_hash)[:16]}...")
+                    if hasattr(receipt, 'block_number'):
+                        parts.append(f"height: {receipt.block_number}")
+                msg = "Success"
+                if parts:
+                    msg += f" ({', '.join(parts)})"
+                if details.get('tao_fee'):
+                    msg += f" fee: {details['tao_fee']}"
+                return True, msg, details
+            else:
+                error_parts = []
+                if response.message:
+                    error_parts.append(str(response.message))
+                if response.error:
+                    error_parts.append(str(response.error))
+                error_msg = " | ".join(error_parts) if error_parts else "Transaction failed (no details returned by SDK)"
+                if _is_retryable(error_msg) and attempt < max_retries:
+                    delay = RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)]
+                    time.sleep(delay)
+                    continue
+                return False, error_msg, {}
 
-            # Extract fees
-            if hasattr(response, 'transaction_tao_fee') and response.transaction_tao_fee:
-                details['tao_fee'] = response.transaction_tao_fee
-            if hasattr(response, 'transaction_alpha_fee') and response.transaction_alpha_fee:
-                details['alpha_fee'] = response.transaction_alpha_fee
+        except Exception as e:
+            last_exception = e
+            if _is_retryable(str(e)) and attempt < max_retries:
+                delay = RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)]
+                time.sleep(delay)
+                continue
+            return False, f"Exception: {type(e).__name__}: {e}", {}
 
-            # Extract stake changes
-            if hasattr(response, 'data') and response.data:
-                details.update(response.data)
+    return False, f"Failed after {max_retries} retries. Last: {last_exception}", {}
 
-            # Build success message
-            parts = []
-            if hasattr(response, 'extrinsic_receipt') and response.extrinsic_receipt:
-                receipt = response.extrinsic_receipt
-                if hasattr(receipt, 'block_hash'):
-                    parts.append(f"block: {str(receipt.block_hash)[:16]}...")
-                if hasattr(receipt, 'block_number'):
-                    parts.append(f"height: {receipt.block_number}")
 
-            msg = "Success"
-            if parts:
-                msg += f" ({', '.join(parts)})"
-            if details.get('tao_fee'):
-                msg += f" fee: {details['tao_fee']}"
-
-            return True, msg, details
-        else:
-            # Failed — extract the actual error message
-            error_parts = []
-            if response.message:
-                error_parts.append(str(response.message))
-            if response.error:
-                error_parts.append(str(response.error))
-            error_msg = " | ".join(error_parts) if error_parts else "Transaction failed (no details returned by SDK)"
-            return False, error_msg, {}
-
-    except Exception as e:
-        return False, f"Exception: {type(e).__name__}: {e}", {}
+def _is_retryable(error_msg: str) -> bool:
+    retryable_patterns = [
+        "rate limit", "timeout", "connection", "network",
+        "busy", "temporarily", "503", "429", "too many", "pool",
+    ]
+    lower = error_msg.lower()
+    return any(p in lower for p in retryable_patterns)
 
 
 def format_transaction_results(results, console):
