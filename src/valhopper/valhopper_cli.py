@@ -24,7 +24,7 @@ from .models import (
     color_age,
 )
 from .client import BittensorClient
-from .valhopper_transactions import load_wallet, execute_stake_move, format_transaction_results
+from .valhopper_transactions import load_wallet, execute_stake_move, estimate_stake_move_fee, format_transaction_results
 from .valhopper_logging import write_transaction_log, format_json_output
 
 logging.basicConfig(
@@ -364,6 +364,13 @@ def optimize(ctx, dry_run, risk_level, max_stake_per_move):
 
     if skipped > 0:
         console.print(f"[dim]Skipped {skipped} position(s) due to validator changes[/dim]")
+
+    total_estimated_fee = 0.0
+    for pos in validated_positions:
+        est = estimate_stake_move_fee(client.subtensor, pos)
+        total_estimated_fee += est.get("estimated_tao_fee", 0.001)
+
+    console.print(f"\n[bold]Estimated transaction fees:[/bold] ~{total_estimated_fee:.6f} TAO for {len(validated_positions)} move(s)")
 
     console.print(f"\nExecuting {len(validated_positions)} stake moves...")
 

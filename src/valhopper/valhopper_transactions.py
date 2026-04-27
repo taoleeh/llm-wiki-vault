@@ -161,6 +161,16 @@ def _is_retryable(error_msg: str) -> bool:
     return any(p in lower for p in retryable_patterns)
 
 
+def estimate_stake_move_fee(subtensor, position) -> dict:
+    try:
+        if hasattr(subtensor, "get_transfer_fee"):
+            fee = subtensor.get_transfer_fee()
+            return {"estimated_tao_fee": float(fee)}
+    except Exception:
+        pass
+    return {"estimated_tao_fee": 0.001}
+
+
 def format_transaction_results(results, console):
     """Format transaction results for display.
 
