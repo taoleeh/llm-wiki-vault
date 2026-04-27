@@ -120,6 +120,67 @@ Yields vary dramatically between validators and subnets. A stake earning 0/day c
 4. **Compare yields** - For each position, find the best validator on that subnet
 5. **Move stakes** - Use `move_stake` to transfer to the best validator (same subnet, different hotkey)
 
+## Configuration
+
+ValHopper supports a YAML config file at `~/.valhopper/config.yaml`. Generate a default:
+
+```bash
+# Create default config
+python -c "from valhopper.config import write_default_config; print(write_default_config())"
+```
+
+Sample config:
+
+```yaml
+# ~/.valhopper/config.yaml
+coldkey: null
+wallet_name: null
+wallet_hotkey: default
+wallet_path: ~/.bittensor/wallets
+network: finney
+risk_level: moderate
+min_improvement: 0.0
+format: table
+discord_webhook_url: null
+```
+
+## JSON Output
+
+All commands support `--format json` for machine-readable output:
+
+```bash
+vh --coldkey YOUR_KEY --format json list-stakes
+vh --coldkey YOUR_KEY --format json optimize --dry-run
+vh --format json top-validators 1
+```
+
+JSON output includes a `command` field and structured data, suitable for piping to `jq` or scripts.
+
+## Yield History
+
+ValHopper stores daily yield snapshots in a local SQLite database at `~/.valhopper/history.db`. This enables tracking validator yield trends over time. (CLI commands for snapshotting and querying history coming in a future release.)
+
+## Fee Estimation
+
+The `optimize` command now displays estimated transaction fees before execution, so you can evaluate cost vs. benefit before confirming moves.
+
+## Retry Logic
+
+Transient transaction failures (rate limits, timeouts, network errors) are automatically retried up to 3 times with increasing delays (2s, 5s, 10s). Non-retryable errors (insufficient balance, permission denied) fail immediately.
+
+## Automated Rebalancing
+
+For scheduled rebalancing, use a simple wrapper script:
+
+```bash
+#!/bin/bash
+# rebalance.sh
+valhopper --coldkey YOUR_KEY optimize --dry-run --format json > /tmp/vh_last_run.json
+# Remove --dry-run and add --wallet-name for auto-execution
+```
+
+Schedule with your preferred tool (`cron`, systemd timer, `launchd`, or a tmux loop).
+
 ## Security Notes
 
 - **Never share your coldkey private key** - The CLI only needs the SS58 address for read operations
@@ -171,6 +232,19 @@ ruff check src/
 ```
 
 ## Changelog
+
+### v0.2.0 - Core infrastructure refactor
+
+- **Modular architecture**: Split monolithic CLI into focused modules (`models.py`, `client.py`, `config.py`, `db.py`)
+- **Config file support**: YAML config at `~/.valhopper/config.yaml` with sensible defaults
+- **JSON output**: `--format json` flag on all commands for machine-readable output
+- **Yield history DB**: SQLite database at `~/.valhopper/history.db` for tracking validator yield trends
+- **Fee estimation**: `optimize` command shows estimated fees before execution
+- **Retry/backoff**: Transient transaction failures retry up to 3 times (2s, 5s, 10s delays)
+- **DI for BittensorClient**: Subtensor instance injectable for testing
+- **Delegate hotkey index**: O(1) lookup by hotkey instead of linear scan
+- **Moved env guard**: `BT_NO_PARSE_CLI_ARGS` no longer set on import; moved to CLI entry point
+- **Removed dead code**: Deleted obsolete `patch_return.py`
 
 ### v0.1.1 - Bug fixes
 
