@@ -9,8 +9,6 @@ import os
 import json as json_lib
 import logging
 
-os.environ['BT_NO_PARSE_CLI_ARGS'] = '1'
-
 import click
 from rich.console import Console
 from rich.table import Table
@@ -59,6 +57,7 @@ console = Console()
 @click.pass_context
 def cli(ctx, network, coldkey, wallet_name, wallet_hotkey, wallet_path, risk_level, output_format):
     """ValHopper - Optimize your Bittensor Alpha token stakes."""
+    os.environ['BT_NO_PARSE_CLI_ARGS'] = '1'
     ctx.ensure_object(dict)
     ctx.obj['network'] = network
     ctx.obj['coldkey'] = coldkey
