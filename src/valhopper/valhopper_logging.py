@@ -5,6 +5,7 @@ Writes transaction results to timestamped log files under
 Filename format: YYYY-MM-DD_HH-MM-SS.log
 """
 
+import json as json_lib
 import os
 from datetime import datetime
 from pathlib import Path
@@ -35,7 +36,7 @@ def write_transaction_log(results):
 
     Args:
         results: List of (position, success, message, details) tuples
-                 as returned by execute_stake_move / format_transaction_results.
+        as returned by execute_stake_move / format_transaction_results.
 
     Returns:
         Path to the written log file, or None if no results to log.
@@ -65,12 +66,12 @@ def write_transaction_log(results):
             fail_count += 1
 
         lines.append(f"Transaction #{i}")
-        lines.append(f"  Subnet:    {pos.netuid}")
-    lines.append(f" Amount: {pos.stake_tao:.4f} {pos.token_symbol}")
-        lines.append(f"  From:      {pos.hotkey}")
-        lines.append(f"  To:        {pos.best_validator_hotkey}")
-        lines.append(f"  Status:    {status_str}")
-        lines.append(f"  Details:   {msg}")
+        lines.append(f"  Subnet: {pos.netuid}")
+        lines.append(f"  Amount: {pos.stake_tao:.4f} {pos.token_symbol}")
+        lines.append(f"  From: {pos.hotkey}")
+        lines.append(f"  To: {pos.best_validator_hotkey}")
+        lines.append(f"  Status: {status_str}")
+        lines.append(f"  Details: {msg}")
 
         if details:
             lines.append(f"  Block Info:")
@@ -92,7 +93,7 @@ def write_transaction_log(results):
         for _, s, _, details in results if s and 'alpha_fee' in details
     )
     if total_tao_fee > 0:
-        lines.append(f"Total TAO fees:   {total_tao_fee:.6f}")
+        lines.append(f"Total TAO fees: {total_tao_fee:.6f}")
     if total_alpha_fee > 0:
         lines.append(f"Total Alpha fees: {total_alpha_fee:.6f}")
 
@@ -105,3 +106,17 @@ def write_transaction_log(results):
 
     filepath.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return filepath
+
+
+def format_json_output(command: str, data: dict) -> str:
+    """Format command output as JSON string.
+
+    Args:
+        command: The CLI command name (e.g. 'list-stakes', 'optimize')
+        data: Dict of output data
+
+    Returns:
+        JSON string
+    """
+    output = {"command": command, **data}
+    return json_lib.dumps(output, indent=2, default=str)
